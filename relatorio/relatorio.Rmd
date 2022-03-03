@@ -1,0 +1,301 @@
+---
+title: "Monitoramento SRAG - Santa Catarina"
+author: "Bianca Bittencourt"
+date: '2022-02-28'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Instalação dos pacotes
+
+```{r pacotes}
+pacman::p_load(
+  tidyverse,         # data management
+  stringr,           # work with strings/characters
+  lubridate,         # work with dates
+  rio,               # import / export
+  here,              # relative file paths
+  fs)                # directory interactions
+
+library(dplyr)
+
+```
+
+## Exportando o Banco de dados
+
+Os bancos de dados (BD) epidemiológicos de SRAG, da rede de vigilância da Influenza e outros vírus respiratórios, desde o início da sua implantação (2009) até os dias atuais (2022), com a incorporação da vigilância da covid-19. Atualmente, o sistema oficial para o registro dos casos e óbitos por SRAG é o Sistema de Informação da Vigilância Epidemiológica da Gripe (SIVEP-Gripe). Os dados são atualizados uma vez por semana e estão sujeitos a alterações decorrentes da investigação, encerramento das fichas ou mesmo correções de erros de digitação, pelas equipes de vigilância epidemiológica que desenvolvem o serviço nas três esferas de gestão.
+
+1.  Para exportar o dataset:
+
+<https://opendatasus.saude.gov.br/dataset>
+
+1.  Para acessar o dicionário de dados:
+
+<https://opendatasus.saude.gov.br/dataset/srag-2021-e-2022/resource/3135ac9c-2019-4989-a893-2ed50ebd8e68>
+
+1.  Para acessar a ficha de notificação:
+
+<https://opendatasus.saude.gov.br/dataset/srag-2021-e-2022/resource/9f0edb83-f8c2-4b53-99c1-099425ab634c>
+
+## Importando o banco de dados para o Rstudio
+
+Nesse relatório foi utilizado apenas o BD referente as SRAGs notificadas no ano de 2022.
+
+```{r import}
+caminho <- here::here("dados", "INFLUD22-21-02-2022.csv")
+sivep <- readr::read_csv2(caminho)
+```
+
+## Limpeza e tratamento do banco de dados
+
+Para verificar as variáveis presentes no BD utilizando a função \`names\` seguido do nome do DB.
+
+```{r names}
+names (sivep)
+
+```
+
+### Selecionando os dados referente ao Estado de Santa Catarina
+
+Primeiro é necesário criar uma variável nova chamada de \`munres\`a partir da variável original \`CO_MUN_RES\` e simultaneamente reduzir o numero de algarismos para que a variável fique identica ao código do IBGE (6 digitos). Depois criamos uma segunda variável nomeada como \`ufres\` apenas com os dois primeiros algarismos de forma que seja possível filtrar para a UF de interesse
+
+```{r}
+sivep$munres <- substr(sivep$CO_MUN_RES,1,6)
+sivep$ufres <- substr(sivep$munres,1,2)
+```
+
+### Filtrando apenas para Santa Catarina
+
+O comando abaixo filtra apenas para as notificações em Santa Catarina (código 42).
+
+```{r uf}
+sivep <- sivep[sivep[, "ufres"]== 42,]
+```
+
+### Criar uma variável de contagem
+
+```{r contagem}
+sivep$count <- 1
+```
+
+### Transformando os campos de datas
+
+As datas precisam ser transformadas para o formato de data porque no BD original elas estão salvas como variável de texto.
+
+```{r datas}
+sivep$dt_sint <- as.Date(sivep$DT_SIN_PRI,format="%d/%m/%Y")
+sivep$dt_nasc <- as.Date(sivep$DT_NASC,format="%d/%m/%Y")
+sivep$dt_obito <- as.Date(sivep$DT_EVOLUCA,format="%d/%m/%Y")
+sivep$dt_interna <- as.Date(sivep$DT_INTERNA,format="%d/%m/%Y")
+sivep$dt_notifica <- as.Date(sivep$DT_NOTIFIC,format="%d/%m/%Y")
+sivep$dt_vacina1<- as.Date(sivep$DOSE_1_COV,format="%d/%m/%Y")
+sivep$dt_vacina2<- as.Date(sivep$DOSE_2_COV,format="%d/%m/%Y")
+```
+
+### Criando grupos por estrato de idade
+
+Criando uma variável nova chamada \*idade\*.
+
+Transformar a variável `NU_IDADE_N`\` uma variável numérica com o \`as.numeric\`.
+
+```{r idade}
+sivep$NU_IDADE_N <- as.numeric(sivep$NU_IDADE_N)
+sivep$idade <- ifelse(sivep$TP_IDADE == 3, sivep$NU_IDADE_N, 0)
+```
+
+O passo seguinte é transformar a \*idade\* em categorias. Vamos criar duas categorizações:
+
+1\. A cada 10 anos:
+
+```{r faixa etária 1}
+
+sivep$fxetar=8
+sivep[which(sivep$idade >=0 & sivep$idade<=9),]$fxetar=1
+sivep[which(sivep$idade>=10 & sivep$idade<=19),]$fxetar=2
+sivep[which(sivep$idade>=20 & sivep$idade<=29),]$fxetar=3
+sivep[which(sivep$idade>=30 & sivep$idade<=39),]$fxetar=4
+sivep[which(sivep$idade>=40 & sivep$idade<=49),]$fxetar=5
+sivep[which(sivep$idade>=50 & sivep$idade<=59),]$fxetar=6
+sivep[which(sivep$idade>=60 & sivep$idade<=69),]$fxetar=7
+sivep[which(sivep$idade>=70 & sivep$idade<130),]$fxetar=8
+
+sivep$fxetar=factor(sivep$fxetar,levels=c(1:8),labels=c("0-9","10-19","20-29","30-39","40-49","50-59","60-69","70+"))
+```
+
+2\. Conforme a estratificação de priorização vacinal:
+
+```{r faixa etaria 2}
+
+sivep$idade_cat=10
+sivep[which(sivep$idade >=0 & sivep$idade<=4),]$idade_cat=1
+sivep[which(sivep$idade>=5 & sivep$idade<=11),]$idade_cat=2
+sivep[which(sivep$idade>=12 & sivep$idade<=17),]$idade_cat=3
+sivep[which(sivep$idade>=18 & sivep$idade<=29),]$idade_cat=4
+sivep[which(sivep$idade>=30 & sivep$idade<=39),]$idade_cat=5
+sivep[which(sivep$idade>=40 & sivep$idade<=49),]$idade_cat=6
+sivep[which(sivep$idade>=50 & sivep$idade<=59),]$idade_cat=7
+sivep[which(sivep$idade>=60 & sivep$idade<=69),]$idade_cat=8
+sivep[which(sivep$idade>=70 & sivep$idade<=79),]$idade_cat=9
+sivep[which(sivep$idade>=80 & sivep$idade<110),]$idade_cat=10
+
+
+sivep$idade_cat=factor(sivep$idade_cat,levels=c(1:10),labels=c("0-4","5-11","12-17","18-29","30-39","40-49","50-59","60-69","70-79", "80+"))
+```
+
+### Renomeando os campos de interesse
+
+1.  Classificação final
+
+```{r classificacao final}
+ sivep <- sivep |> 
+           mutate(classi_final = recode(CLASSI_FIN,
+                                        # for reference: OLD = NEW
+                                        "1"  = "SRAG por influenza",
+                                        "2" = "SRAG por outro vírus  respiratório",
+                                        "3"  = "SRAG por outro agente  etiológico",
+                                        "4"  = "SRAG não especificado",
+                                        "5"   = "SRAG por covid-19"))
+```
+
+2\. Raça
+
+```{r raca}
+         sivep$CS_RACA[sivep$CS_RACA == "1"] <- "Branca"
+         sivep$CS_RACA[sivep$CS_RACA == "2"] <- "Preta"
+         sivep$CS_RACA[sivep$CS_RACA == "3"] <- "Amarela"
+         sivep$CS_RACA[sivep$CS_RACA == "4"] <- "Parda"
+         sivep$CS_RACA[sivep$CS_RACA == "5"] <- "Indigena"
+         sivep$CS_RACA[sivep$CS_RACA == "9"] <- "Ignorado"
+```
+
+3\. Escolaridade
+
+```{r escolaridade}
+         sivep$escola[sivep$CS_ESCOL_N == "0"] <- "Sem escolaridade/Analfabeto"
+         sivep$escola[sivep$CS_ESCOL_N == "1"] <- "Fundamental 1o ciclo (1 a 5 série)"
+         sivep$escola[sivep$CS_ESCOL_N == "2"] <- "Fundamental 2o ciclo (6 a 9 série)"
+         sivep$escola[sivep$CS_ESCOL_N == "3"] <- "Médio (1 ao 3 ano)"
+         sivep$escola[sivep$CS_ESCOL_N == "4"] <- "Superior"
+         sivep$escola[sivep$CS_ESCOL_N == "5"] <- "Não se aplica"
+         sivep$escola[sivep$CS_ESCOL_N == "9"] <- "Ignorado"
+```
+
+4\. UTI
+
+```{r uti}
+sivep$uti [sivep$UTI == "1"] <- "SIM"
+         sivep$uti [sivep$UTI == "2"] <- "NÃO"
+         sivep$uti [sivep$UTI == "9"] <- "IGNORADO"
+```
+
+5. Evolução
+
+```{r evolucao}
+         sivep$evolucao [sivep$EVOLUCAO == "1"] <- "CURA"
+         sivep$evolucao [sivep$EVOLUCAO == "2"] <- "ÓBITO"
+         sivep$evolucao [sivep$EVOLUCAO == "3"] <- "ÓBITO POR OUTRAS CAUSAS"
+         sivep$evolucao [sivep$EVOLUCAO == "9"] <- "IGNORADO"
+```
+
+6\. vacina
+
+```{r vacina}
+sivep <- sivep %>%
+        mutate(vacina = replace_na(VACINA_COV, "2"))
+       
+ sivep <- sivep %>%
+        mutate(vacina = recode(VACINA_COV,
+                                  # for reference: OLD = NEW
+                                  "1" = "Sim",
+                                  "2" = "Não"))
+                                    
+```
+
+### Tabela de SRAG
+
+```{r tabela1}
+classe_final_srag <- sivep |> 
+dplyr::count(idade_cat) |> 
+janitor::adorn_totals()
+
+classe_final_srag |> 
+  dplyr::rename("Faixa etária"= idade_cat, "Frequência" = n) |> 
+
+DT::datatable(classe_final_srag)
+ 
+```
+
+### Tabela Sexo por faixa etária
+
+Uma tabulação cruzada ajustada para que tanto as contagens quanto as porcentagens sejam exibidas.
+
+```{r tabela2}
+library(janitor)
+
+sivep %>%                                  # case linelist
+  tabyl(idade_cat, CS_SEXO) %>%                  # cross-tabulate counts
+  adorn_totals(where = "row") %>%             # add a total row
+  adorn_percentages(denominator = "col") %>%  # convert to proportions
+  adorn_pct_formatting() %>%                  # convert to percents
+  adorn_ns(position = "front") %>%            # display as: "count (percent)"
+  adorn_title(                                # adjust titles
+    row_name = "Faixa etária",
+    col_name = "Sexo")
+```
+
+### Gráfico Hospitalizados
+
+```{r grafico1}
+library(ggplot2)
+
+ggplot(sivep, aes(x = dt_interna, y = count)) +
+  geom_col(fill = "darkred", width = 1) +
+  theme_minimal()+
+  labs(
+    x = "Data de internação",
+    y = "Casos de SRAG- 2022",
+    title = "Hospitalizações por SRAG"
+  ) 
+```
+
+Gráfico por classificação final
+
+```{r grafico2}
+ggplot(data = sivep, mapping = aes(x = dt_interna, fill = classi_final)) +
+  geom_histogram(binwidth = 2)+
+  labs(title = "Classificação final")
+```
+
+### Criar o dataframe para COVID-19
+
+Para criar um banco somente com os casos de covid-19 os casos com classificação final para COVID-19 usar a variável \`CLASSI_FIN\`
+
+```{r covid}
+covid <- sivep |> 
+  filter(classi_final== "SRAG por covid-19" & dt_interna > "2022-01-01")
+```
+
+### Tabelas por idade e sexo  dos casos de Covid-19
+
+```{r tabela3}
+covid %>%                                  # case linelist
+  tabyl(idade_cat, CS_SEXO) %>%                  # cross-tabulate counts
+  adorn_totals(where = "row") %>%             # add a total row
+  adorn_percentages(denominator = "col") %>%  # convert to proportions
+  adorn_pct_formatting() %>%                  # convert to percents
+  adorn_ns(position = "front") %>%            # display as: "count (percent)"
+  adorn_title(                                # adjust titles
+    row_name = "Faixa etária",
+    col_name = "Sexo")
+```
+
+### Gráfico série temporal de hospitalizados por COVID-19 em 2022.
+
+```{r grafico3}
+ggplot(data = covid)+
+  geom_histogram(aes(x = dt_interna))
+
+```
